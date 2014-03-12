@@ -83,7 +83,20 @@ module SerializationHelper
       quoted_column_names = column_names.map { |column| ActiveRecord::Base.connection.quote_column_name(column) }.join(',')
       quoted_table_name = SerializationHelper::Utils.quote_table(table)
       records.each do |record|
-        quoted_values = record.zip(columns).map{|c| ActiveRecord::Base.connection.quote(c.first, c.last)}.join(',')
+        # workaround for problem with enhanced oracle adapter. the problem
+        # clob values get replaced by 'empty_clob()', which leads to data not getting
+        # imported. PR https://github.com/rsim/oracle-enhanced/pull/371 fixes this issue.
+        # there is no released version with that fix yet, so we workaround this
+        # issue here (as the problem only occurred with the yaml import, so we
+        # don't want to patch the oracle adapter)
+        quoted_values = record.zip(columns).map { |c|
+          if c.last.type == :text
+            ActiveRecord::ConnectionAdapters::AbstractAdapter.new(ActiveRecord::Base.connection).quote(c.first, c.last)
+          else
+            ActiveRecord::Base.connection.quote(c.first, c.last)
+          end
+        }.join(',')
+
         ActiveRecord::Base.connection.execute("INSERT INTO #{quoted_table_name} (#{quoted_column_names}) VALUES (#{quoted_values})")
       end
     end
